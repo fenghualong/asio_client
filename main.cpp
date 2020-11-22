@@ -12,21 +12,48 @@ boost::asio::steady_timer make_timer(boost::asio::io_context &context) {
 int main() {
     boost::asio::io_context context;
 
-    auto timer1 = make_timer(context);
-    std::cout << "entering steady_timer::wait\n";
-    timer1.wait();
-    std::cout << "exited steady_timer::wait\n";
+    boost::asio::ip::tcp::resolver resolver{context};
+//    boost::system::error_code ec;
+//    for(auto&& result : resolver.resolve("www.nostarch.com", "http", ec)) {
+//        std::cout << result.service_name() << " "
+//                  << result.host_name() << " "
+//                  << result.endpoint() << " "
+//                  << std::endl;
+//    }
+//    if(ec) std::cout << "Error code: " << ec << std::endl;
 
-    auto timer2 = make_timer(context);
-    std::cout << "entering steady_time::async_wait\n";
-    timer2.async_wait([](const boost::system::error_code& error) {
-        if(!error) std::cout << "<<callback function>>\n";
+//    resolver.async_resolve("www.nostarch.com", "http", [](boost::system::error_code ec, const auto& results){
+//       if(ec) {
+//           std::cerr << "Error: " << ec << std::endl;
+//           return;
+//       }
+//       for(auto&& result : results) {
+//           std::cout << result.service_name() << " "
+//                     << result.host_name() << " "
+//                     << result.endpoint() << " "
+//                     << std::endl;
+//       }
+//    });
+
+//    std::cout << "connected endpoint\n";
+    boost::asio::ip::tcp::socket socket{context};
+//    try {
+//        auto endpoints = resolver.resolve("www.nostarch.com","http");
+//        const auto connected_endpoint = boost::asio::connect(socket, endpoints);
+//        std::cout << connected_endpoint;
+//    } catch (boost::system::system_error& se) {
+//        std::cerr << "Error: " << se.what() << std::endl;
+//    }
+
+    boost::asio::async_connect(socket,
+            resolver.resolve("www.nostarch.com", "http"),
+            [](boost::system::error_code ec, const auto& endpoint){
+       std::cout << endpoint << std::endl;
     });
-    std::cout << "exited steady_timer::async_wait\n";
 
-    std::cout << "entering io_context::run\n";
+
+
     context.run();
-    std::cout << "exited io_context::run\n";
 
     return 0;
 }
