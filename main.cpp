@@ -1,7 +1,7 @@
 #include <iostream>
 #include <boost/asio.hpp>
 #include <chrono>
-//#include <istream>
+#include <istream>
 #include <ostream>
 #include <string>
 
@@ -12,41 +12,113 @@ boost::asio::steady_timer make_timer(boost::asio::io_context &context) {
     };
 }
 
-std::string request(std::string host, boost::asio::io_context& io_connect) {
-    std::stringstream request_stream;
-    request_stream << "GET / HTTP/1.1\r\n"
-                   << "Host: " << host << "\r\n"
-                   << "Accept: text/html\r\n"
-                   << "Accept-Language: en-us\r\n"
-                   << "Accept-Encoding: identity\r\n"
-                   << "Connection: close\r\n\r\n";
+//std::string request(std::string host, boost::asio::io_context& io_connect) {
+//    std::stringstream request_stream;
+//    request_stream << "GET / HTTP/1.1\r\n"
+//                   << "Host: " << host << "\r\n"
+//                   << "Accept: text/html\r\n"
+//                   << "Accept-Language: en-us\r\n"
+//                   << "Accept-Encoding: identity\r\n"
+//                   << "Connection: close\r\n\r\n";
+//
+//    const auto request = request_stream.str();
+//    boost::asio::ip::tcp::resolver resolver(io_connect);
+//    const auto endpoints = resolver.resolve(host, "http");
+//    boost::asio::ip::tcp::socket socket(io_connect);
+//    const auto connected_endpoint = boost::asio::connect(socket, endpoints);
+//    boost::asio::write(socket, boost::asio::buffer(request));
+//    std::string response;
+//    boost::system::error_code ec;
+//    boost::asio::read(socket, boost::asio::dynamic_buffer(response), ec);
+//    if(ec && ec.value() != 2) throw boost::system::system_error(ec);
+//    return response;
+//}
 
-    const auto request = request_stream.str();
-    boost::asio::ip::tcp::resolver resolver(io_connect);
-    const auto endpoints = resolver.resolve(host, "http");
-    boost::asio::ip::tcp::socket socket(io_connect);
-    const auto connected_endpoint = boost::asio::connect(socket, endpoints);
-    boost::asio::write(socket, boost::asio::buffer(request));
-    std::string response;
-    boost::system::error_code ec;
-    boost::asio::read(socket, boost::asio::dynamic_buffer(response), ec);
-    if(ec && ec.value() != 2) throw boost::system::system_error(ec);
-    return response;
-}
+using ResolveResult = boost::asio::ip::tcp::resolver::results_type;
+using Endpoint = boost::asio::ip::tcp::endpoint;
+
+struct Request {
+    explicit Request(boost::asio::io_context& io_context, std::string host)
+    : resolver(io_context),
+      socket(io_context),
+      host(std::move(host)){
+        std::stringstream request_stream;
+        request_stream << "GET / HTTP/1.1\r\n"
+                       << "Host: " << host << "\r\n"
+                       << "Accept: text/html\r\n"
+                       << "Accept-Language: en-us\r\n"
+                       << "Accept-Encoding: identity\r\n"
+                       << "Connection: close\r\n\r\n";
+
+        request = request_stream.str();
+        resolver.async_resolve(this->host, "http", [this](boost::system::error_code ec, const ResolveResult & results) {
+            resolution_handler(ec, results);
+        });
+    }
+
+    void resolution_handler(boost::system::error_code ec,
+                           const ResolveResult& results) {
+        if(ec) {
+            std::cerr << "Error resolving " << host << ": " << ec << std::endl;
+            return;
+        }
+
+        boost::asio::async_connect(socket, results, [this](boost::system::error_code ec, const Endpoint& endpoint){
+            connection_handler(ec, endpoint);
+        });
+    }
+
+    void connection_handler(boost::system::error_code ec, const Endpoint& endpoint) {
+       if(ec) {
+           std::cerr << "Error connecting to " << host << ": " << ec.message() << std::endl;
+       }
+       boost::asio::async_write(socket, boost::asio::buffer(request),
+               [this](boost::system::error_code ec, size_t transferred){
+           write_handler(ec, transferred);
+       });
+    }
+
+    void write_handler(boost::system::error_code ec, size_t transferred) {
+        if(ec) {
+            std::cerr << "Error writing to " << host << ": " << ec.message() << std::endl;
+        }else if(request.size() != transferred) {
+            request.erase(0, transferred); //删除已经发送的字符，继续发送未成功的
+            boost::asio::async_write(socket, boost::asio::buffer(request),
+                                     [this](boost::system::error_code ec, size_t transferred){
+                                         write_handler(ec, transferred);
+                                     });
+        }else {
+           boost::asio::async_read(socket, boost::asio::dynamic_buffer(response),
+                   [this](boost::system::error_code ec, size_t transferred){
+               read_handler(ec, transferred);
+           });
+        }
+    }
+
+    void read_handler(boost::system::error_code ec, size_t transferred) {
+        if(ec && ec.value() != 2)
+            std::cerr << "Error reading from " << host << ": " << ec.message() << std::endl;
+    }
+
+    const std::string& get_response() const noexcept {
+        return response;
+    }
+
+private:
+    boost::asio::ip::tcp::resolver resolver;
+    boost::asio::ip::tcp::socket socket;
+    std::string request, response;
+    const std::string host;
+};
 
 int main() {
     boost::asio::io_context context;
 
-    try {
-        const auto response = request("www.baidu.com", context);
-        std::cout << response.size() << std::endl;
-        std::cout << response << std::endl;
-    }catch(boost::system::system_error& se) {
-        std::cerr << "Error: " << se.what() << std::endl;
-    }
-
+    Request request(context, "www.baidu.com");
 
     context.run();
+
+    std::cout << request.get_response() << std::endl;
 
     return 0;
 }
