@@ -1,6 +1,9 @@
 #include <iostream>
 #include <boost/asio.hpp>
 #include <chrono>
+//#include <istream>
+#include <ostream>
+#include <string>
 
 boost::asio::steady_timer make_timer(boost::asio::io_context &context) {
     return boost::asio::steady_timer{
@@ -9,48 +12,38 @@ boost::asio::steady_timer make_timer(boost::asio::io_context &context) {
     };
 }
 
+std::string request(std::string host, boost::asio::io_context& io_connect) {
+    std::stringstream request_stream;
+    request_stream << "GET / HTTP/1.1\r\n"
+                   << "Host: " << host << "\r\n"
+                   << "Accept: text/html\r\n"
+                   << "Accept-Language: en-us\r\n"
+                   << "Accept-Encoding: identity\r\n"
+                   << "Connection: close\r\n\r\n";
+
+    const auto request = request_stream.str();
+    boost::asio::ip::tcp::resolver resolver(io_connect);
+    const auto endpoints = resolver.resolve(host, "http");
+    boost::asio::ip::tcp::socket socket(io_connect);
+    const auto connected_endpoint = boost::asio::connect(socket, endpoints);
+    boost::asio::write(socket, boost::asio::buffer(request));
+    std::string response;
+    boost::system::error_code ec;
+    boost::asio::read(socket, boost::asio::dynamic_buffer(response), ec);
+    if(ec && ec.value() != 2) throw boost::system::system_error(ec);
+    return response;
+}
+
 int main() {
     boost::asio::io_context context;
 
-    boost::asio::ip::tcp::resolver resolver{context};
-//    boost::system::error_code ec;
-//    for(auto&& result : resolver.resolve("www.nostarch.com", "http", ec)) {
-//        std::cout << result.service_name() << " "
-//                  << result.host_name() << " "
-//                  << result.endpoint() << " "
-//                  << std::endl;
-//    }
-//    if(ec) std::cout << "Error code: " << ec << std::endl;
-
-//    resolver.async_resolve("www.nostarch.com", "http", [](boost::system::error_code ec, const auto& results){
-//       if(ec) {
-//           std::cerr << "Error: " << ec << std::endl;
-//           return;
-//       }
-//       for(auto&& result : results) {
-//           std::cout << result.service_name() << " "
-//                     << result.host_name() << " "
-//                     << result.endpoint() << " "
-//                     << std::endl;
-//       }
-//    });
-
-//    std::cout << "connected endpoint\n";
-    boost::asio::ip::tcp::socket socket{context};
-//    try {
-//        auto endpoints = resolver.resolve("www.nostarch.com","http");
-//        const auto connected_endpoint = boost::asio::connect(socket, endpoints);
-//        std::cout << connected_endpoint;
-//    } catch (boost::system::system_error& se) {
-//        std::cerr << "Error: " << se.what() << std::endl;
-//    }
-
-    boost::asio::async_connect(socket,
-            resolver.resolve("www.nostarch.com", "http"),
-            [](boost::system::error_code ec, const auto& endpoint){
-       std::cout << endpoint << std::endl;
-    });
-
+    try {
+        const auto response = request("www.baidu.com", context);
+        std::cout << response.size() << std::endl;
+        std::cout << response << std::endl;
+    }catch(boost::system::system_error& se) {
+        std::cerr << "Error: " << se.what() << std::endl;
+    }
 
 
     context.run();
